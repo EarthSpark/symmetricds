@@ -91,7 +91,8 @@ create_java_options() {
 }
 
 run_java() {
-    local CLASSPATH="${SYM_HOME}/patches:${SYM_HOME}/patches/*:${SYM_HOME}/lib/*:${SYM_HOME}/web/WEB-INF/lib/*"
+    cd "$SYM_HOME"
+    local CLASSPATH="${SYM_HOME}/patches:${SYM_HOME}/patches/*:${SYM_HOME}/lib/*:${SYM_HOME}/lib:${SYM_HOME}/web/WEB-INF/lib/*"
     java $SYM_OPTIONS -cp "$CLASSPATH" "$@"
 }
 
@@ -128,6 +129,10 @@ if [ ! -z "${DATABASE_URL+x}" ]; then
     JDBC_DBNAME=$(echo "$DATABASE_URL" | awk -F/ '{print $4}')
     JDBC_URL="jdbc:postgresql://${JDBC_HOST}/${JDBC_DBNAME}"
 
+    export JDBC_URL
+    export JDBC_USER
+    export JDBC_PASSWORD
+
     SYM_OPTIONS="$SYM_OPTIONS -Ddb.driver=org.postgresql.Driver -Ddb.url=$JDBC_URL"
 
     if [ ! -z "${JDBC_USER}" ]; then
@@ -150,7 +155,6 @@ fi
 echo "[ Runtime Options ]"
 echo "$SYM_OPTIONS"
 
-cd "$SYM_HOME"
 echo "[ Running symadmin create-sym-tables ]"
 cat <<EOF >> $PROPERTIES_FILE
 engine.name=$ENGINE_NAME
@@ -171,16 +175,21 @@ registration.url=$REGISTRATION_URL
 EOF
 run_symadmin --properties $PROPERTIES_FILE create-sym-tables
 
-# echo "[ Checking if SymmetricDS is configured ]"
-# stmt = "SELECT COUNT(*) FROM sym_node WHERE node_id = '$EXTERNAL_ID'"
-# period = 10
-# while true; do
-#     if [ "$(psql stmt)" = "1" ]; then
-#         break;
-#     fi
-#     echo "[ Not yet, waiting 30 seconds ]"
-#     sleep 30
-# done;
+# Wait for master registration
+if [ -z "$REGISTRATION_URL" ]; then
+    echo "[ Checking if SymmetricDS is configured ]"
+    stmt="SELECT COUNT(*) FROM sym_node WHERE node_group_id = '$GROUP_ID';"
+    period=10
+    while true; do
+        run_java psql "$stmt" > res
+        if [ "$(cat res)" = "1" ]; then
+            echo "[ Database seems okay, starting up normally ]"
+            break;
+        fi
+        echo "[ Not yet, waiting $period seconds ]"
+        sleep $period
+    done
+fi
 
 echo "[ Running sym ]"
 PARAMS="--no-log-file --properties $PROPERTIES_FILE"
