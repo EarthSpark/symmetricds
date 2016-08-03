@@ -6,7 +6,7 @@ ARG SYMDS_URL=https://sourceforge.net/projects/symmetricds/files/symmetricds/sym
 
 RUN adduser -D symmetricds
 
-RUN apk add --update --no-cache ca-certificates bash curl openjdk7-jre-base && \
+RUN apk add --update --no-cache ca-certificates bash curl openssl openjdk7-jre-base && \
     rm -rf \
         /root/src/ \
         /tmp/* \
