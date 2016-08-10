@@ -198,6 +198,20 @@ wait_for_registration() {
     fi
 }
 
+wait_for_table() {
+    table=$1
+    echo "[ Waiting for table $table to be created ]"
+    stmt="SELECT COUNT(*) FROM pg_tables WHERE tablename = '$table';"
+    while true; do
+        run_java psql "$stmt" > res
+        if [ "$(cat res)" = "1" ]; then
+            break
+        fi
+        sleep 2
+    done
+    echo "[ Table $table found ]"
+}
+
 run_java() {
     cd "$SYM_HOME"
     local CLASSPATH="${SYM_HOME}/patches:${SYM_HOME}/patches/*:${SYM_HOME}/lib/*:${SYM_HOME}/lib:${SYM_HOME}/web/WEB-INF/lib/*"
@@ -219,8 +233,13 @@ create_property_file
 show_environment
 
 wait_for_postgres
-run_symadmin create-sym-tables
-wait_for_registration
+
+# Master node should wait until the whole schema has been created
+if [ -z "${REGISTRATION_URL}" ]; then
+    run_symadmin create-sym-tables
+    wait_for_table wallet
+    wait_for_registration
+fi
 
 PARAMS="--no-log-file"
 if [ ! -z "${CLIENT_ONLY+x}" ]; then
