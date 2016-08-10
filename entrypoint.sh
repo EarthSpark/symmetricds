@@ -90,110 +90,139 @@ create_java_options() {
     echo $options
 }
 
+create_runtime_options() {
+    export SYM_OPTIONS=$(create_java_options)
+
+    if [ ! -z "${KEYSTORE_URL+x}" ]; then
+        echo "[ Downloading keystore from $KEYSTORE_URL ]"
+        s3simple get $KEYSTORE_URL $SYM_HOME/security/keystore.downloaded
+        SYM_OPTIONS="$SYM_OPTIONS -Dsym.keystore.file=$SYM_HOME/security/keystore.downloaded"
+    else
+        SYM_OPTIONS="$SYM_OPTIONS -Dsym.keystore.file=$SYM_HOME/security/keystore"
+    fi
+
+    if [ ! -z "${DATABASE_URL+x}" ]; then
+        tmp=$(echo "$DATABASE_URL" | awk -F/ '{print $3}')
+        if [[ $tmp == *"@"* ]]; then
+            user_pass=$(echo "$tmp" | awk -F@ '{print $1}')
+            JDBC_HOST=$(echo "$tmp" | awk -F@ '{print $2}')
+            JDBC_USER=$(echo "$user_pass" | awk -F: '{print $1}')
+            JDBC_PASSWORD=$(echo "$user_pass" | awk -F: '{print $2}')
+        else
+            JDBC_HOST=$tmp
+            JDBC_USER=""
+            JDBC_PASSWORD=""
+        fi
+        JDBC_DBNAME=$(echo "$DATABASE_URL" | awk -F/ '{print $4}')
+        JDBC_URL="jdbc:postgresql://${JDBC_HOST}/${JDBC_DBNAME}?schema=public"
+
+        export JDBC_URL
+        export JDBC_USER
+        export JDBC_PASSWORD
+
+        SYM_OPTIONS="$SYM_OPTIONS -Ddb.driver=org.postgresql.Driver -Ddb.url=$JDBC_URL"
+
+        if [ ! -z "${JDBC_USER}" ]; then
+            SYM_OPTIONS="$SYM_OPTIONS -Ddb.user=$JDBC_USER"
+        fi
+        if [ ! -z "${JDBC_PASSWORD}" ]; then
+            SYM_OPTIONS="$SYM_OPTIONS -Ddb.password=$JDBC_PASSWORD"
+        fi
+    fi
+
+    # Enable HTTPS, disable HTTP
+    if [ "$PROTOCOL" = "https" ]; then
+        SYM_OPTIONS="$SYM_OPTIONS -Dhttp.enable=false -Dhttps.allow.self.signed.certs=false"
+        SYM_OPTIONS="$SYM_OPTIONS -Dhttps.enable=true"
+    else
+        SYM_OPTIONS="$SYM_OPTIONS -Dhttp.enable=true -Dhttps.allow.self.signed.certs=false"
+        SYM_OPTIONS="$SYM_OPTIONS -Dhttps.enable=false"
+    fi
+}
+
+create_property_file() {
+    if [ -f $PROPERTIES_FILE ]; then
+        return
+    fi
+    cat <<EOF >> $PROPERTIES_FILE
+auto.registration=${AUTO_REGISTRATION}
+auto.reload=${AUTO_RELOAD}
+db.driver=org.postgresql.Driver
+db.password=$JDBC_PASSWORD
+db.url=$JDBC_URL
+db.user=$JDBC_USER
+engine.name=$ENGINE_NAME
+external.id=$EXTERNAL_ID
+group.id=$GROUP_ID
+job.pull.period.time.ms=${PULL_PERIOD}
+job.push.period.time.ms=${PUSH_PERIOD}
+purge.retention.minutes=${PURGE_RETENTION}
+registration.url=$REGISTRATION_URL
+start.synctriggers.job=${START_SYNCTRIGGERS}
+sync.url=$SYNC_URL
+EOF
+}
+
+show_environment() {
+    echo "[ Environment variables ]"
+    export|sort
+
+    echo "[ Properties file ]"
+    cat $PROPERTIES_FILE
+}
+
+wait_for_postgres() {
+    echo "[ Trying to establish a connection to PostgreSQL... ]"
+    until run_java psql "SELECT 1;" &>/dev/null; do
+        sleep 2
+    done
+    echo "[ Connection established ]"
+}
+
+
+wait_for_registration() {
+    # Wait for master registration
+    if [ -z "$REGISTRATION_URL" ]; then
+        echo "[ Checking if SymmetricDS is configured ]"
+        stmt="SELECT COUNT(*) FROM sym_node WHERE node_group_id = '$GROUP_ID';"
+        period=10
+        while true; do
+            run_java psql "$stmt" > res
+            if [ "$(cat res)" = "1" ]; then
+                echo "[ Database seems okay, starting up normally ]"
+                break;
+            fi
+            echo "[ Not yet, waiting $period seconds ]"
+            sleep $period
+        done
+    fi
+}
+
 run_java() {
     cd "$SYM_HOME"
     local CLASSPATH="${SYM_HOME}/patches:${SYM_HOME}/patches/*:${SYM_HOME}/lib/*:${SYM_HOME}/lib:${SYM_HOME}/web/WEB-INF/lib/*"
     java $SYM_OPTIONS -cp "$CLASSPATH" "$@"
 }
 
-run_sym() {
-    run_java org.jumpmind.symmetric.SymmetricLauncher "$@"
-}
-
 run_symadmin() {
-    run_java org.jumpmind.symmetric.SymmetricAdmin "$@"
+    echo "[ Running symadmin $@ ]"
+    run_java org.jumpmind.symmetric.SymmetricAdmin --properties $PROPERTIES_FILE "$@"
 }
 
-export SYM_OPTIONS=$(create_java_options)
+run_sym() {
+    echo "[ Running sym $@ ]"
+    run_java org.jumpmind.symmetric.SymmetricLauncher --properties $PROPERTIES_FILE "$@"
+}
 
-if [ ! -z "${KEYSTORE_URL+x}" ]; then
-    echo "[ Downloading keystore from $KEYSTORE_URL ]"
-    s3simple get $KEYSTORE_URL $SYM_HOME/security/keystore.downloaded
-    SYM_OPTIONS="$SYM_OPTIONS -Dsym.keystore.file=$SYM_HOME/security/keystore.downloaded"
-else
-    SYM_OPTIONS="$SYM_OPTIONS -Dsym.keystore.file=$SYM_HOME/security/keystore"
-fi
+create_runtime_options
+create_property_file
+show_environment
 
-if [ ! -z "${DATABASE_URL+x}" ]; then
-    tmp=$(echo "$DATABASE_URL" | awk -F/ '{print $3}')
-    if [[ $tmp == *"@"* ]]; then
-        user_pass=$(echo "$tmp" | awk -F@ '{print $1}')
-        JDBC_HOST=$(echo "$tmp" | awk -F@ '{print $2}')
-        JDBC_USER=$(echo "$user_pass" | awk -F: '{print $1}')
-        JDBC_PASSWORD=$(echo "$user_pass" | awk -F: '{print $2}')
-    else
-        JDBC_HOST=$tmp
-        JDBC_USER=""
-        JDBC_PASSWORD=""
-    fi
-    JDBC_DBNAME=$(echo "$DATABASE_URL" | awk -F/ '{print $4}')
-    JDBC_URL="jdbc:postgresql://${JDBC_HOST}/${JDBC_DBNAME}"
+wait_for_postgres
+run_symadmin create-sym-tables
+wait_for_registration
 
-    export JDBC_URL
-    export JDBC_USER
-    export JDBC_PASSWORD
-
-    SYM_OPTIONS="$SYM_OPTIONS -Ddb.driver=org.postgresql.Driver -Ddb.url=$JDBC_URL"
-
-    if [ ! -z "${JDBC_USER}" ]; then
-        SYM_OPTIONS="$SYM_OPTIONS -Ddb.user=$JDBC_USER"
-    fi
-    if [ ! -z "${JDBC_PASSWORD}" ]; then
-        SYM_OPTIONS="$SYM_OPTIONS -Ddb.password=$JDBC_PASSWORD"
-    fi
-fi
-
-# Enable HTTPS, disable HTTP
-if [ "$PROTOCOL" = "https" ]; then
-    SYM_OPTIONS="$SYM_OPTIONS -Dhttp.enable=false -Dhttps.allow.self.signed.certs=false"
-    SYM_OPTIONS="$SYM_OPTIONS -Dhttps.enable=true"
-else
-    SYM_OPTIONS="$SYM_OPTIONS -Dhttp.enable=true -Dhttps.allow.self.signed.certs=false"
-    SYM_OPTIONS="$SYM_OPTIONS -Dhttps.enable=false"
-fi
-
-echo "[ Runtime Options ]"
-echo "$SYM_OPTIONS"
-
-echo "[ Running symadmin create-sym-tables ]"
-cat <<EOF >> $PROPERTIES_FILE
-engine.name=$ENGINE_NAME
-group.id=$GROUP_ID
-external.id=$EXTERNAL_ID
-db.driver=org.postgresql.Driver
-db.url=$JDBC_URL
-db.user=$JDBC_USER
-db.password=$JDBC_PASSWORD
-job.pull.period.time.ms=${PULL_PERIOD}
-job.push.period.time.ms=${PUSH_PERIOD}
-start.synctriggers.job=${START_SYNCTRIGGERS}
-purge.retention.minutes=${PURGE_RETENTION}
-auto.reload=${AUTO_RELOAD}
-auto.registration=${AUTO_REGISTRATION}
-sync.url=$SYNC_URL
-registration.url=$REGISTRATION_URL
-EOF
-run_symadmin --properties $PROPERTIES_FILE create-sym-tables
-
-# Wait for master registration
-if [ -z "$REGISTRATION_URL" ]; then
-    echo "[ Checking if SymmetricDS is configured ]"
-    stmt="SELECT COUNT(*) FROM sym_node WHERE node_group_id = '$GROUP_ID';"
-    period=10
-    while true; do
-        run_java psql "$stmt" > res
-        if [ "$(cat res)" = "1" ]; then
-            echo "[ Database seems okay, starting up normally ]"
-            break;
-        fi
-        echo "[ Not yet, waiting $period seconds ]"
-        sleep $period
-    done
-fi
-
-echo "[ Running sym ]"
-PARAMS="--no-log-file --properties $PROPERTIES_FILE"
-
+PARAMS="--no-log-file"
 if [ ! -z "${CLIENT_ONLY+x}" ]; then
     PARAMS="$PARAMS --client"
 fi
