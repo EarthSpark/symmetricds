@@ -17,8 +17,10 @@ set -eu
 : ${PUSH_PERIOD:=60000}
 : ${REGISTRATION_URL:=}
 : ${START_SYNCTRIGGERS:=false}
+: ${STREAM_TO_FILE_THRESHOLD:=32767}
 : ${SYM_HOME:=/opt/symmetric}
 : ${SYNC_URL:=}
+: ${WAIT_URL:=}
 
 # s3simple is a small, simple bash s3 client with minimal dependencies.
 # See http://github.com/paulhammond/s3simple for documentation and licence.
@@ -160,6 +162,7 @@ purge.retention.minutes=${PURGE_RETENTION}
 registration.url=$REGISTRATION_URL
 start.synctriggers.job=${START_SYNCTRIGGERS}
 sync.url=$SYNC_URL
+stream.to.file.threshold.bytes=${STREAM_TO_FILE_THRESHOLD}
 EOF
 }
 
@@ -231,6 +234,14 @@ run_sym() {
 create_runtime_options
 create_property_file
 show_environment
+
+# If a WAIT_URL is specified, wait for it until proceeding
+if [ -n "${WAIT_URL}" ]; then
+    echo "[ Waiting for ${WAIT_URL} to come online ]"
+    until curl -sk ${WAIT_URL} > /dev/null; do
+        sleep 2
+    done
+fi
 
 wait_for_postgres
 
