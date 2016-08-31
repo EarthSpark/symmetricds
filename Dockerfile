@@ -44,6 +44,7 @@ RUN curl -L $SYMDS_URL -o $SYMDS_ZIP && \
         $SYMDS_DIR/lib/web/WEB-INF/scala-library-*.jar
 
 COPY entrypoint.sh /entrypoint.sh
+COPY log4j.xml $SYMDS_DIR/conf/log4j.xml
 COPY psql.class $SYMDS_DIR/lib/psql.class
 
 VOLUME /opt/symmetric/tmp
