@@ -10,6 +10,8 @@ set -eu
 : ${ENGINE_NAME:=engine-name}
 : ${EXTERNAL_ID:=external-id}
 : ${GROUP_ID:=group-id}
+: ${HTTP_USERNAME:=}
+: ${HTTP_PASSWORD:=}
 : ${PROPERTIES_FILE:=/tmp/symdb.properties}
 : ${PROTOCOL:=https}
 : ${PULL_PERIOD:=60000}
@@ -163,7 +165,19 @@ registration.url=$REGISTRATION_URL
 start.synctriggers.job=${START_SYNCTRIGGERS}
 sync.url=$SYNC_URL
 stream.to.file.threshold.bytes=${STREAM_TO_FILE_THRESHOLD}
+http.push.stream.output.enabled=false
 EOF
+
+    if [ -n "${REGISTRATION_URL}" ]; then
+        if [ -n "${HTTP_USERNAME}" -a -n "${HTTP_PASSWORD}" ]; then
+            echo "[ Enabling http basic auth for client ]"
+            cat <<EOF >> $PROPERTIES_FILE
+http.basic.auth.username=${HTTP_USERNAME}
+http.basic.auth.password=${HTTP_PASSWORD}
+EOF
+        fi
+    fi
+
 }
 
 show_environment() {
