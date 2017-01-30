@@ -12,6 +12,7 @@ set -eu
 : ${GROUP_ID:=group-id}
 : ${HTTP_USERNAME:=}
 : ${HTTP_PASSWORD:=}
+: ${JAVA_MAX_HEAP_SIZE:=64m}
 : ${PROPERTIES_FILE:=/tmp/symdb.properties}
 : ${PROTOCOL:=https}
 : ${PULL_PERIOD:=60000}
@@ -77,9 +78,8 @@ s3simple() {
 
     curl $args -s -f -H Date:"${date}" -H Authorization:"${authorization}" https://s3.amazonaws.com"${path}"
 }
-
-create_java_options() {
-    local options="-Dfile.encoding=utf-8 \
+create_runtime_options() {
+    export SYM_OPTIONS="-Dfile.encoding=utf-8 \
 -Duser.language=en \
 -Djava.io.tmpdir=${SYM_HOME}/tmp \
 -Dorg.eclipse.jetty.server.Request.maxFormContentSize=800000 \
@@ -90,12 +90,8 @@ create_java_options() {
 -Dsun.net.client.defaultConnectTimeout=1800000 \
 -Djava.net.preferIPv4Stack=true \
 -XX:+HeapDumpOnOutOfMemoryError \
--XX:HeapDumpPath=${SYM_HOME}/tmp"
-    echo $options
-}
-
-create_runtime_options() {
-    export SYM_OPTIONS=$(create_java_options)
+-XX:HeapDumpPath=${SYM_HOME}/tmp
+-Xmx${JAVA_MAX_HEAP_SIZE}"
 
     if [ ! -z "${KEYSTORE_URL+x}" ]; then
         echo "[ Downloading keystore from $KEYSTORE_URL ]"
