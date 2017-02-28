@@ -255,6 +255,12 @@ fi
 
 wait_for_postgres
 
+if [ "$1" = "symadmin" ]; then
+    shift
+    run_symadmin $@
+    exit $?
+fi
+
 # Master node should wait until the whole schema has been created
 if [ -z "${REGISTRATION_URL}" ]; then
     run_symadmin create-sym-tables
