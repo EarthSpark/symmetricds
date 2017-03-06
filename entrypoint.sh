@@ -255,7 +255,7 @@ fi
 
 wait_for_postgres
 
-if [ "$1" = "symadmin" ]; then
+if [ "${1:-}" = "symadmin" ]; then
     shift
     run_symadmin $@
     exit $?
