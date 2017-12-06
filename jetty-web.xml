@@ -1,0 +1,10 @@
+<Configure class="org.eclipse.jetty.webapp.WebAppContext">
+    <Get name="securityHandler">
+        <Set name="loginService">
+            <New class="org.eclipse.jetty.security.HashLoginService">
+                <Set name="name">default</Set>
+                <Set name="config"><SystemProperty name="user.dir" default="."/>/web/WEB-INF/realm.properties</Set>
+            </New>
+        </Set>
+    </Get>
+</Configure>

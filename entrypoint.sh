@@ -164,8 +164,15 @@ stream.to.file.threshold.bytes=${STREAM_TO_FILE_THRESHOLD}
 http.push.stream.output.enabled=false
 EOF
 
-    if [ -n "${REGISTRATION_URL}" ]; then
-        if [ -n "${HTTP_USERNAME}" -a -n "${HTTP_PASSWORD}" ]; then
+    if [ -n "${HTTP_USERNAME}" -a -n "${HTTP_PASSWORD}" ]; then
+        if [ -z "${REGISTRATION_URL}" ]; then
+            echo "[ Enabling http basic auth for server ]"
+            cat <<EOF >> $SYM_HOME/web/WEB-INF/realm.properties
+${HTTP_USERNAME}: ${HTTP_PASSWORD},node
+EOF
+            cp $SYM_HOME/tmp/web.xml $SYM_HOME/web/WEB-INF/
+            cp $SYM_HOME/tmp/jetty-web.xml $SYM_HOME/web/WEB-INF/
+        else
             echo "[ Enabling http basic auth for client ]"
             cat <<EOF >> $PROPERTIES_FILE
 http.basic.auth.username=${HTTP_USERNAME}

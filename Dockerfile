@@ -45,7 +45,9 @@ RUN curl -L $SYMDS_URL -o $SYMDS_ZIP && \
 
 COPY entrypoint.sh /entrypoint.sh
 COPY log4j.xml $SYMDS_DIR/conf/log4j.xml
+COPY jetty-web.xml $SYMDS_DIR/tmp
 COPY psql.class $SYMDS_DIR/lib/psql.class
+COPY web.xml $SYMDS_DIR/tmp
 
 VOLUME /opt/symmetric/tmp
 
