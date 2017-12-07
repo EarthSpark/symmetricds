@@ -181,6 +181,22 @@ EOF
         fi
     fi
 
+    # Read all environment variables like:
+    #
+    #   PROP_x_y_z=abc
+    #   PROP_stream_to_file_threshold_bytes=1000
+    #
+    # convert them to properties formatted like:
+    #
+    #   x.y.z=abc
+    #   stream.to.file.threshold.bytes=1000
+    #
+    while IFS='=' read -r name value ; do
+        if [[ $name == 'PROP_'* ]]; then
+            key=${name##*PROP_}
+            echo "${key//_/.}=${!name}" >> $PROPERTIES_FILE
+        fi
+    done < <(env);
 }
 
 show_environment() {
