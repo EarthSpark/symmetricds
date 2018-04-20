@@ -23,8 +23,8 @@ RUN apk add --update --no-cache ca-certificates bash curl openssl openjdk7-jre-b
         /usr/share/,icons,man,mime,misc,p11-kit,pkgconfig,terminfo,themes,xml} \
         /usr/lib/jvm/java-1.7-openjdk/jre/lib/amd64/server/classes.jsa
 
-ENV SYMDS_VERSION 3.7.35
-ENV SYMDS_VERSION_SHORT 3.7
+ENV SYMDS_VERSION 3.9.6
+ENV SYMDS_VERSION_SHORT 3.9
 ARG SYMDS_URL=https://sourceforge.net/projects/symmetricds/files/symmetricds/symmetricds-$SYMDS_VERSION_SHORT/symmetric-server-$SYMDS_VERSION.zip/download
 
 RUN curl -L $SYMDS_URL -o $SYMDS_ZIP && \
