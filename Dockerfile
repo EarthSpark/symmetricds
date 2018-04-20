@@ -1,14 +1,10 @@
-FROM alpine:3.4
+FROM openjdk:jre-alpine
 ENV SYMDS_DIR /opt/symmetric
 ENV SYMDS_ZIP symmetric.zip
-# NOTE: Do not edit these variables, they will invalidate 100mb of cache unnecessarily
-# instead use SYMDS_VERSION, SYMDS_VERSION_SHORT, and SYMDS_URL in the second half of the script
-ENV SYMDS_VERSION 3.7.35
-ARG SYMDS_URL=https://sourceforge.net/projects/symmetricds/files/symmetricds/symmetricds-3.7/symmetric-server-$SYMDS_VERSION.zip/download
 
 RUN adduser -D symmetricds
 
-RUN apk add --update --no-cache ca-certificates bash curl openssl openjdk7-jre-base && \
+RUN apk add --update --no-cache ca-certificates bash curl openssl && \
     rm -rf \
         /root/src/ \
         /tmp/* \
@@ -20,8 +16,7 @@ RUN apk add --update --no-cache ca-certificates bash curl openssl openjdk7-jre-b
         /usr/lib/lib{gdk,gtk,cups,jpeg,turbo,pc,tiff,avahi}* \
         /usr/lib/lib{,asound,dbus,pixman,kr,x,X}* \
         /usr/share/{X11,alsa,doc,fontconfig,gtk-doc} \
-        /usr/share/,icons,man,mime,misc,p11-kit,pkgconfig,terminfo,themes,xml} \
-        /usr/lib/jvm/java-1.7-openjdk/jre/lib/amd64/server/classes.jsa
+        /usr/share/,icons,man,mime,misc,p11-kit,pkgconfig,terminfo,themes,xml}
 
 ENV SYMDS_VERSION 3.9.6
 ENV SYMDS_VERSION_SHORT 3.9
