@@ -3,6 +3,8 @@ ENV SYMDS_DIR /opt/symmetric
 ENV SYMDS_ZIP symmetric.zip
 ENV SYMDS_VERSION 3.7.35
 ARG SYMDS_URL=https://sourceforge.net/projects/symmetricds/files/symmetricds/symmetricds-3.7/symmetric-server-$SYMDS_VERSION.zip/download
+ARG POSTGRESQL_JDBC_VERSION=42.2.18
+ENV POSTGRESQL_JDBC_URL=https://jdbc.postgresql.org/download/postgresql-$POSTGRESQL_JDBC_VERSION.jre7.jar
 
 RUN adduser -D symmetricds
 
@@ -25,7 +27,6 @@ RUN curl -L $SYMDS_URL -o $SYMDS_ZIP && \
     mkdir -p /opt && \
     unzip -q $SYMDS_ZIP -d /opt/ && \
     mv /opt/symmetric-server-$SYMDS_VERSION $SYMDS_DIR && \
-    chown -R symmetricds $SYMDS_DIR && \
     rm -rf \
         $SYMDS_ZIP \
         $SYMDS_DIR/doc \
@@ -38,10 +39,14 @@ RUN curl -L $SYMDS_URL -o $SYMDS_ZIP && \
         $SYMDS_DIR/lib/mongo-java-driver-*.jar \
         $SYMDS_DIR/lib/mysql-connector-java-*.jar \
         $SYMDS_DIR/lib/ojdbc-*.jar \
+        $SYMDS_DIR/lib/postgresql-*.jar \
         $SYMDS_DIR/lib/sqlite-jdbc-*.jar \
         $SYMDS_DIR/lib/voltdbclient-*.jar \
         $SYMDS_DIR/lib/web/WEB-INF/jna-*.tar \
-        $SYMDS_DIR/lib/web/WEB-INF/scala-library-*.jar
+        $SYMDS_DIR/lib/web/WEB-INF/scala-library-*.jar && \
+    cd $SYMDS_DIR/lib && \
+    curl -OL $POSTGRESQL_JDBC_URL && \
+    chown -R symmetricds $SYMDS_DIR
 
 COPY entrypoint.sh /entrypoint.sh
 COPY log4j.xml $SYMDS_DIR/conf/log4j.xml
