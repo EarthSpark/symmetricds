@@ -2,8 +2,8 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
-    tags: ["**"]
+    branches: ["main"]
+    tags: ["v*"]
   pull_request:
 
 env:
