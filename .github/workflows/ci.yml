@@ -16,11 +16,14 @@ env:
 jobs:
   docker-build:
     runs-on: ubuntu-latest
+    env:
+      IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to registry
+        if: env.IS_FORK_PR != 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -37,6 +40,7 @@ jobs:
             type=semver,pattern={{version}}
             type=sha,format=long
       - name: Build and push
+        if: env.IS_FORK_PR != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -44,3 +48,21 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      # Fork PRs run with a read-only token and cannot push. Build to an
+      # OCI archive and upload it; the publish-pr workflow (running in
+      # this repo's context) pushes it under controlled tags.
+      - name: Build image archive (fork PR)
+        if: env.IS_FORK_PR == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          outputs: type=oci,dest=${{ runner.temp }}/pr-image.tar
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Upload image artifact (fork PR)
+        if: env.IS_FORK_PR == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-image
+          path: ${{ runner.temp }}/pr-image.tar
+          retention-days: 7
