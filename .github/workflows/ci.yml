@@ -8,27 +8,23 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
-  docker-build:
+  # The only place the image is built. Both architectures are produced once,
+  # into an OCI archive that the later jobs consume: the test runs it, and
+  # the publish step pushes that same archive. Nothing downstream rebuilds,
+  # so what ships is the artifact that passed.
+  build:
     runs-on: ubuntu-latest
-    env:
-      IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Log in to registry
-        if: env.IS_FORK_PR != 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Generate image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -39,30 +35,88 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=sha,format=long
-      - name: Build and push
-        if: env.IS_FORK_PR != 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-      # Fork PRs run with a read-only token and cannot push. Build to an
-      # OCI archive and upload it; the publish-pr workflow (running in
-      # this repo's context) pushes it under controlled tags.
-      - name: Build image archive (fork PR)
-        if: env.IS_FORK_PR == 'true'
+      - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           outputs: type=oci,dest=${{ runner.temp }}/pr-image.tar
           labels: ${{ steps.meta.outputs.labels }}
-      - name: Upload image artifact (fork PR)
-        if: env.IS_FORK_PR == 'true'
+      - name: Upload image
         uses: actions/upload-artifact@v4
         with:
           name: pr-image
           path: ${{ runner.temp }}/pr-image.tar
           retention-days: 7
+
+  # Building the image only proves it assembles. This runs it: a ground and a
+  # cloud database, a SymmetricDS node beside each, and an assertion that a
+  # row written on one side arrives on the other. It catches runtime breakage
+  # a build cannot see — a JVM incompatibility, for instance, that leaves the
+  # sync endpoint answering 503 while the engine itself logs as healthy.
+  sync-test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download image
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-image
+          path: ${{ runner.temp }}
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+      # The archive holds both architectures; load the runner's own so the
+      # test exercises it natively rather than under emulation.
+      - name: Load image
+        run: |
+          skopeo copy --override-arch amd64 --override-os linux \
+            "oci-archive:${{ runner.temp }}/pr-image.tar" \
+            docker-daemon:symmetricds:ci
+      - name: Run the two-node sync test
+        env:
+          SYMDS_IMAGE: symmetricds:ci
+        run: scripts/run_tests.sh
+
+  # Pushes the archive built above, unchanged, once the test has passed.
+  # Fork pull requests are skipped here: their token is read-only, so
+  # publish-pr.yml pushes their artifact from the base repo's context.
+  publish:
+    needs: sync-test
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download image
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-image
+          path: ${{ runner.temp }}
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,format=long
+      - name: Push image
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          skopeo login "$REGISTRY" -u "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
+          printf '%s\n' "$TAGS" | while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "Pushing $tag"
+            skopeo copy --all "oci-archive:${{ runner.temp }}/pr-image.tar" "docker://$tag"
+          done

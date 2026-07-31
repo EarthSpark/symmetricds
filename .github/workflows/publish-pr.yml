@@ -25,7 +25,8 @@ jobs:
     if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      # Same-repo PRs push directly from CI and upload no artifact.
+      # CI uploads the built image on every run; same-repo PRs already
+      # pushed it from CI's own publish job, so only forks are handled here.
       - name: Check for image artifact
         id: artifact
         uses: actions/github-script@v7
@@ -57,10 +58,12 @@ jobs:
               core.setFailed(`No open PR found with head ${headSha}`);
               return;
             }
+            const isFork = pr.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`;
+            core.setOutput('is_fork', isFork ? 'true' : 'false');
             core.setOutput('number', pr.number);
             core.setOutput('head_sha', headSha);
       - name: Download image artifact
-        if: steps.artifact.outputs.found == 'true'
+        if: steps.artifact.outputs.found == 'true' && steps.pr.outputs.is_fork == 'true'
         uses: actions/download-artifact@v4
         with:
           name: pr-image
@@ -68,7 +71,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ${{ runner.temp }}
       - name: Push image
-        if: steps.artifact.outputs.found == 'true'
+        if: steps.artifact.outputs.found == 'true' && steps.pr.outputs.is_fork == 'true'
         run: |
           IMAGE="${REGISTRY}/${GITHUB_REPOSITORY,,}"
           skopeo login "${REGISTRY}" -u "${{ github.actor }}" --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
