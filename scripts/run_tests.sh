@@ -58,9 +58,8 @@ wait_for() {
     return 1
 }
 
-# SYMDS_IMAGE names an already-built image to test. CI sets it so the image
-# under test is the artifact that gets published, rather than a second build
-# of the same Dockerfile. Unset, the stack builds from this checkout.
+# SYMDS_IMAGE names an already-built image to test. Unset, the stack builds
+# from this checkout.
 if [ -n "${SYMDS_IMAGE:-}" ]; then
     echo "[ Starting the stack against ${SYMDS_IMAGE} ]"
     "${COMPOSE[@]}" up -d postgres-ground postgres-cloud symds-ground symds-cloud

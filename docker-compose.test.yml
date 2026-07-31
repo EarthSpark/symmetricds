@@ -38,8 +38,7 @@ services:
     build:
       context: .
     # SYMDS_IMAGE names an already-built image to test instead of building
-    # from this checkout. CI sets it to the artifact the build job produced,
-    # so the image under test is the one that gets published.
+    # from this checkout.
     image: ${SYMDS_IMAGE:-symmetricds:test}
     environment:
       DATABASE_URL: postgresql://symds:symds@postgres-ground/ground

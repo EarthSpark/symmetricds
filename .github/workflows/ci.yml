@@ -13,12 +13,200 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  # The only place the image is built. Both architectures are produced once,
-  # into an OCI archive that the later jobs consume: the test runs it, and
-  # the publish step pushes that same archive. Nothing downstream rebuilds,
-  # so what ships is the artifact that passed.
-  build:
+  # Each platform builds on a runner of its own architecture, so nothing
+  # is emulated. Neither job tags the image: each pushes an untagged
+  # manifest addressed only by its digest, and docker-manifest below
+  # joins the two digests into one multi-platform tag.
+  docker-build:
+    # Fork PRs cannot push; they take the archive path in
+    # docker-build-fork below.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      # GITHUB_REPOSITORY keeps the owner's capitalization; a registry
+      # reference has to be lowercase. metadata-action does this for its
+      # own output, but the exporter below needs the name directly.
+      - name: Resolve image reference
+        id: image
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}
+        run: echo "ref=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Labels only. The tags are applied to the manifest list, not to
+      # the per-platform images.
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.ref }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ steps.image.outputs.ref }},push-by-digest=true,name-canonical=true,push=true
+      # The digest is carried to the later jobs as a filename; the file
+      # itself is empty.
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          touch "${{ runner.temp }}/digests/${DIGEST#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Brings up a ground and a cloud database with a SymmetricDS node beside
+  # each and asserts that a row written on one side arrives on the other.
+  # Runs on a runner of the image's own architecture, against the digest
+  # docker-build pushed, so each platform is executed and not just built.
+  sync-test:
+    needs: docker-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download digest
+        uses: actions/download-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve image reference
+        id: image
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}
+        run: echo "ref=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+      - name: Pull image by digest
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          digest="$(basename "$(ls "${{ runner.temp }}/digests"/* | head -n1)")"
+          docker pull "${IMAGE}@sha256:${digest}"
+          docker tag "${IMAGE}@sha256:${digest}" symmetricds:ci
+      - name: Run the two-node sync test
+        env:
+          SYMDS_IMAGE: symmetricds:ci
+        run: scripts/run_tests.sh
+
+  docker-manifest:
+    needs: docker-build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+      - name: Resolve image reference
+        id: image
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}
+        run: echo "ref=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.ref }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,format=long
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # One manifest list per tag, referencing both per-platform digests
+      # pushed above. DOCKER_METADATA_OUTPUT_JSON is set by
+      # metadata-action.
+      - name: Create and push manifest list
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "${IMAGE}@sha256:%s " *)
+      - name: Inspect manifest list
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: docker buildx imagetools inspect "${IMAGE}:${VERSION}"
+
+  # Fork PRs run with a read-only token and cannot push, so the digest
+  # merge above is unavailable to them: it needs both images in the
+  # registry. Each platform still builds on a runner of its own
+  # architecture — the runner label is not restricted by the token — and
+  # uploads an archive of its own. The publish-pr workflow, running in
+  # this repo's context, joins those archives into one multi-platform
+  # image and pushes it under tags it controls.
+  docker-build-fork:
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     steps:
@@ -30,93 +218,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=sha,format=long
-      - name: Build image
+      - name: Build image archive
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          outputs: type=oci,dest=${{ runner.temp }}/pr-image.tar
+          platforms: ${{ matrix.platform }}
+          outputs: type=oci,dest=${{ runner.temp }}/pr-image-${{ matrix.arch }}.tar
           labels: ${{ steps.meta.outputs.labels }}
-      - name: Upload image
+      - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pr-image
-          path: ${{ runner.temp }}/pr-image.tar
+          name: pr-image-${{ matrix.arch }}
+          path: ${{ runner.temp }}/pr-image-${{ matrix.arch }}.tar
+          if-no-files-found: error
           retention-days: 7
-
-  # Building the image only proves it assembles. This runs it: a ground and a
-  # cloud database, a SymmetricDS node beside each, and an assertion that a
-  # row written on one side arrives on the other. It catches runtime breakage
-  # a build cannot see — a JVM incompatibility, for instance, that leaves the
-  # sync endpoint answering 503 while the engine itself logs as healthy.
-  sync-test:
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download image
-        uses: actions/download-artifact@v4
-        with:
-          name: pr-image
-          path: ${{ runner.temp }}
-      - name: Install skopeo
-        run: sudo apt-get update && sudo apt-get install -y skopeo
-      # The archive holds both architectures; load the runner's own so the
-      # test exercises it natively rather than under emulation.
-      - name: Load image
-        run: |
-          skopeo copy --override-arch amd64 --override-os linux \
-            "oci-archive:${{ runner.temp }}/pr-image.tar" \
-            docker-daemon:symmetricds:ci
-      - name: Run the two-node sync test
-        env:
-          SYMDS_IMAGE: symmetricds:ci
-        run: scripts/run_tests.sh
-
-  # Pushes the archive built above, unchanged, once the test has passed.
-  # Fork pull requests are skipped here: their token is read-only, so
-  # publish-pr.yml pushes their artifact from the base repo's context.
-  publish:
-    needs: sync-test
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Download image
-        uses: actions/download-artifact@v4
-        with:
-          name: pr-image
-          path: ${{ runner.temp }}
-      - name: Install skopeo
-        run: sudo apt-get update && sudo apt-get install -y skopeo
-      - name: Generate image metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=sha,format=long
-      - name: Push image
-        env:
-          TAGS: ${{ steps.meta.outputs.tags }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          skopeo login "$REGISTRY" -u "${{ github.actor }}" --password-stdin <<< "$GH_TOKEN"
-          printf '%s\n' "$TAGS" | while IFS= read -r tag; do
-            [ -n "$tag" ] || continue
-            echo "Pushing $tag"
-            skopeo copy --all "oci-archive:${{ runner.temp }}/pr-image.tar" "docker://$tag"
-          done
