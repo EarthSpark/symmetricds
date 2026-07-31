@@ -79,7 +79,13 @@ s3simple() {
     curl $args -s -f -H Date:"${date}" -H Authorization:"${authorization}" https://s3.amazonaws.com"${path}"
 }
 create_runtime_options() {
-    export SYM_OPTIONS="-Dfile.encoding=utf-8 \
+    # SymmetricDS 3.7.38 bundles a Spring whose CGLIB reflects into
+    # ClassLoader.defineClass to generate proxies for @Configuration classes.
+    # Java 16+ denies that by default, which fails the web application
+    # context and leaves Jetty answering 503 to every sync request while the
+    # engine itself appears healthy.
+    export SYM_OPTIONS="--add-opens=java.base/java.lang=ALL-UNNAMED \
+-Dfile.encoding=utf-8 \
 -Duser.language=en \
 -Djava.io.tmpdir=${SYM_HOME}/tmp \
 -Dorg.eclipse.jetty.server.Request.maxFormContentSize=800000 \

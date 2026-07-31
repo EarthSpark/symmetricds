@@ -1,0 +1,93 @@
+# Self-contained two-node sync test: a ground and a cloud database, each with
+# a SymmetricDS node beside it, syncing a table between them. Nothing outside
+# this repo is involved — the SymmetricDS configuration is in test/config.sql.
+#
+# Driven by scripts/run_tests.sh, which sequences the startup this stack
+# cannot express with depends_on alone (the ground node's config can only be
+# applied after that node has created the sym_* tables).
+
+services:
+  postgres-ground:
+    image: library/postgres:18
+    environment:
+      POSTGRES_USER: symds
+      POSTGRES_PASSWORD: symds
+      POSTGRES_DB: ground
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U symds -d ground"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  postgres-cloud:
+    image: library/postgres:18
+    environment:
+      POSTGRES_USER: symds
+      POSTGRES_PASSWORD: symds
+      POSTGRES_DB: cloud
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U symds -d cloud"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # Registration server. With no REGISTRATION_URL set, entrypoint.sh runs
+  # `symadmin create-sym-tables`, then blocks on the `wallet` table and on a
+  # sym_node row for its group — both supplied by run_tests.sh.
+  symds-ground:
+    build:
+      context: .
+    # SYMDS_IMAGE names an already-built image to test instead of building
+    # from this checkout.
+    image: ${SYMDS_IMAGE:-symmetricds:test}
+    environment:
+      DATABASE_URL: postgresql://symds:symds@postgres-ground/ground
+      ENGINE_NAME: ground-engine
+      EXTERNAL_ID: ground-1
+      GROUP_ID: ground-group
+      SYNC_URL: http://symds-ground:31415/sync/ground-engine
+      # The image defaults to HTTPS, which needs a keystore. Plain HTTP keeps
+      # the test to the sync path.
+      PROTOCOL: http
+      # Build the capture triggers from sym_trigger without waiting for the
+      # periodic job's first tick.
+      START_SYNCTRIGGERS: "true"
+      PUSH_PERIOD: "2000"
+      PULL_PERIOD: "2000"
+    depends_on:
+      postgres-ground:
+        condition: service_healthy
+
+  # Client node. Setting REGISTRATION_URL makes entrypoint.sh skip
+  # create-sym-tables and both startup waits; it registers against the ground
+  # node, which accepts it because auto.registration defaults to true.
+  symds-cloud:
+    image: ${SYMDS_IMAGE:-symmetricds:test}
+    environment:
+      DATABASE_URL: postgresql://symds:symds@postgres-cloud/cloud
+      ENGINE_NAME: cloud-engine
+      EXTERNAL_ID: cloud-1
+      GROUP_ID: cloud-group
+      SYNC_URL: http://symds-cloud:31415/sync/cloud-engine
+      REGISTRATION_URL: http://symds-ground:31415/sync/ground-engine
+      PROTOCOL: http
+      START_SYNCTRIGGERS: "true"
+      PUSH_PERIOD: "2000"
+      PULL_PERIOD: "2000"
+      # Hold off until the registration server is answering.
+      WAIT_URL: http://symds-ground:31415/sync/ground-engine
+    depends_on:
+      postgres-cloud:
+        condition: service_healthy
+
+  # psql client used for seeding and assertions. Never started as a service;
+  # run_tests.sh invokes it with `run --rm`. SQL files are fed in on stdin
+  # rather than bind-mounted, so the test works against a remote Docker
+  # daemon, where a bind mount would resolve on the daemon's host instead of
+  # the checkout.
+  psql:
+    image: library/postgres:18
+    environment:
+      PGPASSWORD: symds
+    entrypoint: ["psql"]
+    profiles: ["tools"]
