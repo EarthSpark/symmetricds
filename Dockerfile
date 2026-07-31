@@ -33,7 +33,7 @@ RUN apk add --update --no-cache \
         /usr/share/,icons,man,mime,misc,p11-kit,pkgconfig,terminfo,themes,xml} \
         /usr/lib/jvm/java-1.7-openjdk/jre/lib/amd64/server/classes.jsa
 
-RUN curl -L $SYMDS_URL -o $SYMDS_ZIP && \
+RUN curl -fSL --retry 3 --retry-all-errors $SYMDS_URL -o $SYMDS_ZIP && \
     mkdir -p /opt && \
     unzip -q $SYMDS_ZIP -d /opt/ && \
     mv /opt/symmetric-server-$SYMDS_VERSION $SYMDS_DIR && \
@@ -55,7 +55,7 @@ RUN curl -L $SYMDS_URL -o $SYMDS_ZIP && \
         $SYMDS_DIR/lib/web/WEB-INF/jna-*.tar \
         $SYMDS_DIR/lib/web/WEB-INF/scala-library-*.jar && \
     cd $SYMDS_DIR/lib && \
-    curl -OL $POSTGRESQL_JDBC_URL && \
+    curl -fOSL --retry 3 --retry-all-errors $POSTGRESQL_JDBC_URL && \
     chown -R symmetricds $SYMDS_DIR && \
     # SymmetricDS 3.7.38 bundles a stale truststore at
     # $SYMDS_DIR/security/cacerts, and entrypoint.sh pins the JVM to it via
