@@ -5,8 +5,8 @@ ENV SYMDS_DIR=/opt/symmetric
 ENV SYMDS_ZIP=symmetric.zip
 ENV SYMDS_VERSION=3.7.38
 ARG SYMDS_URL=https://sourceforge.net/projects/symmetricds/files/symmetricds/symmetricds-3.7/symmetric-server-$SYMDS_VERSION.zip/download
-ARG POSTGRESQL_JDBC_VERSION=42.2.18
-ENV POSTGRESQL_JDBC_URL=https://jdbc.postgresql.org/download/postgresql-$POSTGRESQL_JDBC_VERSION.jre7.jar
+ARG POSTGRESQL_JDBC_VERSION=42.7.13
+ENV POSTGRESQL_JDBC_URL=https://jdbc.postgresql.org/download/postgresql-$POSTGRESQL_JDBC_VERSION.jar
 
 RUN adduser -D symmetricds
 
