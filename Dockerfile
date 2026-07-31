@@ -1,9 +1,9 @@
-FROM alpine:3.19 
+FROM alpine:3.19
 # Supports both amd64 and arm64
 
-ENV SYMDS_DIR /opt/symmetric
-ENV SYMDS_ZIP symmetric.zip
-ENV SYMDS_VERSION 3.7.38
+ENV SYMDS_DIR=/opt/symmetric
+ENV SYMDS_ZIP=symmetric.zip
+ENV SYMDS_VERSION=3.7.38
 ARG SYMDS_URL=https://sourceforge.net/projects/symmetricds/files/symmetricds/symmetricds-3.7/symmetric-server-$SYMDS_VERSION.zip/download
 ARG POSTGRESQL_JDBC_VERSION=42.2.18
 ENV POSTGRESQL_JDBC_URL=https://jdbc.postgresql.org/download/postgresql-$POSTGRESQL_JDBC_VERSION.jre7.jar
@@ -71,8 +71,6 @@ COPY log4j.xml $SYMDS_DIR/conf/log4j.xml
 COPY jetty-web.xml $SYMDS_DIR/tmp
 COPY psql.class $SYMDS_DIR/lib/psql.class
 COPY web.xml $SYMDS_DIR/tmp
-
-#RUN chmod +x /entrypoint.sh
 
 VOLUME /opt/symmetric/tmp
 
