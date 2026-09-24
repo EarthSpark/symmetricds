@@ -20,4 +20,5 @@ Environment variables
 
 Args
 
-- **SYMDS_URL** Points to the symmetricds-server zip file to download, can be used as a local cache with python -mSimpleHTTPServer
+- **SYMDS_URL** Points to the symmetricds-server zip file to download, can be used as a local cache with python -mSimpleHTTPServer (*default: https://symds-server.s3.us-east-1.amazonaws.com/symmetric-server-$SYMDS_VERSION.zip*)
+- **SYMDS_SHA256** SHA-256 the downloaded zip must match; the build fails on a mismatch (*default: the hash of the default zip, set in the Dockerfile*)

@@ -4,7 +4,8 @@ FROM alpine:3.19
 ENV SYMDS_DIR=/opt/symmetric
 ENV SYMDS_ZIP=symmetric.zip
 ENV SYMDS_VERSION=3.7.38
-ARG SYMDS_URL=https://sourceforge.net/projects/symmetricds/files/symmetricds/symmetricds-3.7/symmetric-server-$SYMDS_VERSION.zip/download
+ARG SYMDS_URL=https://symds-server.s3.us-east-1.amazonaws.com/symmetric-server-$SYMDS_VERSION.zip
+ARG SYMDS_SHA256=cdd5b1ff64730e352afd59b6e0b0641ad1e150033523944b8592354f7872727d
 ARG POSTGRESQL_JDBC_VERSION=42.7.13
 ENV POSTGRESQL_JDBC_URL=https://jdbc.postgresql.org/download/postgresql-$POSTGRESQL_JDBC_VERSION.jar
 
@@ -34,6 +35,7 @@ RUN apk add --update --no-cache \
         /usr/lib/jvm/java-1.7-openjdk/jre/lib/amd64/server/classes.jsa
 
 RUN curl -fSL --retry 3 --retry-all-errors $SYMDS_URL -o $SYMDS_ZIP && \
+    echo "$SYMDS_SHA256  $SYMDS_ZIP" | sha256sum -c - && \
     mkdir -p /opt && \
     unzip -q $SYMDS_ZIP -d /opt/ && \
     mv /opt/symmetric-server-$SYMDS_VERSION $SYMDS_DIR && \
